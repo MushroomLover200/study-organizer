@@ -2,50 +2,35 @@ const Engine = require('mcl-bbl-engine');
 const fs = require('node:fs');
 const path = require('path');
 require('dotenv').config();
+const express = require('express');
+const Session = require('./src/Session');
+const { cleanFilename } = require('./src/utils');
+const { execSync } = require('child_process');
 
 
-const axios = require('axios').create({
-    validateStatus: () => true
-})
-
-function downloadFile(url, path) {
-    return new Promise(async (resolve, reject) => {
-        try {
-            const response = await axios.get(url, {
-                responseType: 'stream', // Allows downloading files as a stream
-                maxRedirects: 10 // Optional: limit the number of redirects
-            });
-
-            // Create a write stream to save the file
-            const writer = fs.createWriteStream(path);
-
-            // Pipe the response data to the file
-            response.data.pipe(writer);
-
-            writer.on('finish', () => {
-                console.log('Download completed!');
-                resolve(true);
-            });
-
-            writer.on('error', (err) => {
-                console.error('Error writing file:', err);
-                resolve(false);
-            });
-        } catch (error) {
-            console.error('Error downloading the file:', error.message);
-            resolve(false);
-        }
-    })
-}
+const ROOT_DIR = path.join(__dirname, '../');
+const SERVER_DIR = path.join(ROOT_DIR, './server');
+const DATA_DIR = path.join(ROOT_DIR, './data');
 
 /**
- * Clean a string
- * @param {string} string - the string to replace 
- * @returns {string} - returns a cleaned string
+ * Checks if required system dependencies are installed before proceeding.
  */
-function cleanFilename(string) {
-    if (typeof string !== 'string') return '';
-    return string.replaceAll(/[<>:"\/\\|?*\x00-\x1F]/g, '');
+function checkSystemRequirements() {
+    try {
+        execSync('which gdown', { stdio: 'ignore' });
+    } catch (e) {
+        console.error('Fatal Error: "gdown" is not installed or not in PATH.');
+        console.error('Please install it (e.g., pip install gdown) to proceed.');
+        process.exit(1);
+    }
+
+    try {
+        execSync('which canva-dl', { stdio: 'ignore' });
+    } catch (e) {
+        console.error('Fatal Error: "canva-dl" is not installed or not in PATH.');
+        console.error('Please install it from https://github.com/MushroomLover200/canva-downloader to proceed.');
+        process.exit(1);
+    }
 }
 
 /**
@@ -85,54 +70,51 @@ async function iterateContents(data, callback) {
  */
 async function getLessonFileLink(lessonData) {
     let fileLink = lessonData.contentDetail["resource/x-bb-file"].file.permanentUrl;
-    let fileURL = new URL('https://mcl.blackboard.com' +fileLink+ '?xythos-download=true');
-    
+    let fileURL = new URL('https://mcl.blackboard.com' + fileLink + '?xythos-download=true');
+
 
     // returns something like
     // https://mcl.blackboard.com/bbcswebdav/pid-2604812-dt-content-rid-112194099_1/xid-112194099_1?xythos-download=true
     return fileURL;
 }
 
+
+
 async function main(params) {
+    checkSystemRequirements();
+
     const bbl = await Engine.create({ username: process.env.BBL_USERNAME, password: process.env.BBL_PASSWORD });
+    const session = new Session(bbl, { dataPath: DATA_DIR });
+    console.log(bbl._getCurrentTerm())
 
 
+
+    // temporary function
     async function getCourseContents() {
         let courses = await bbl.getCourses();
         let course_contents = [];
         for (let course of courses) {
-            let contents = await bbl.getCourseContents(course.id)
-            console.log(await bbl.getCourseContents(course.id, true))
+            // let contents = await bbl.getCourseContents(course.id)
+            console.log(await bbl.getCourseContents(course.id, true)) // here for printing the tree and stuff
 
-            console.log(contents[0]);
-
-            course_contents.push({
-                course: {
-                    title: course.originalId,
-                    id: course.id
-                },
-                contents
-            });
+            // course_contents.push({
+            //     course: {
+            //         title: course.originalId,
+            //         id: course.id
+            //     },
+            //     contents
+            // });
         }
 
-        return course_contents;
+        // return course_contents;
     }
-
-
-    let contents = (await getCourseContents());
-
-    fs.writeFileSync('./contents.json', JSON.stringify(contents, null, 2));
-
-    console.log('Iterating through contents:');
-    await iterateContents(contents, async (item, itemPath) => {
-        // console.log(`Processing: ${itemPath} ${item.contentHandler}`);
-
-        if(item.contentHandler === 'resource/x-bb-file') {
-            console.log(await getLessonFileLink(item));
-        }
-    });
-
+    // await getCourseContents();
+    await session.sync();
     await bbl.close();
+    // const app = express();
+
+
+    // app.listen(5000);
 }
 
 main();

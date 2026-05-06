@@ -3,3 +3,5 @@ contents.json
 node_modules/
 *.gif
 package-lock.json
+ENVISIONED_PLAN.md
+data/
