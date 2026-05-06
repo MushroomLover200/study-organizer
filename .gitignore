@@ -1,0 +1,5 @@
+.env
+contents.json
+node_modules/
+*.gif
+package-lock.json
