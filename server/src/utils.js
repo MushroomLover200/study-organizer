@@ -44,7 +44,42 @@ function sanitizePath(relativePath) {
     return safeSegments.join(path.sep);
 }
 
+class Semaphore {
+    constructor(max) {
+        this.max = max;
+        this.count = 0;
+        this.queue = [];
+    }
+
+    async acquire() {
+        if (this.count < this.max) {
+            this.count++;
+            return Promise.resolve();
+        }
+        return new Promise(resolve => this.queue.push(resolve));
+    }
+
+    release() {
+        this.count--;
+        if (this.queue.length > 0) {
+            this.count++;
+            const next = this.queue.shift();
+            next();
+        }
+    }
+
+    async run(fn) {
+        await this.acquire();
+        try {
+            return await fn();
+        } finally {
+            this.release();
+        }
+    }
+}
+
 module.exports = {
     cleanFilename,
-    sanitizePath
+    sanitizePath,
+    Semaphore
 };
