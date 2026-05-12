@@ -54,8 +54,19 @@ class Session {
         return {};
     }
 
-    saveSyncState() {
-        fs.writeFileSync(this.syncStatePath, JSON.stringify(this.syncState, null, 2));
+    saveSyncState(immediate = false) {
+        if (immediate) {
+            if (this._saveTimeout) clearTimeout(this._saveTimeout);
+            fs.writeFileSync(this.syncStatePath, JSON.stringify(this.syncState, null, 2));
+            this._saveTimeout = null;
+            return;
+        }
+
+        if (this._saveTimeout) clearTimeout(this._saveTimeout);
+        this._saveTimeout = setTimeout(() => {
+            fs.writeFileSync(this.syncStatePath, JSON.stringify(this.syncState, null, 2));
+            this._saveTimeout = null;
+        }, 1000); 
     }
 
     /**
@@ -252,30 +263,38 @@ class Session {
                 if (!needsSync && !fs.existsSync(expectedPath)) needsSync = true;
                 if (!needsSync) return console.log(`[Skipped] ${safeItemPath}`);
 
-                if (isGdown) {
-                    const isDir = url.includes('/folders/') || url.includes('id=');
-                    const flag = isDir ? '--folder' : '';
-                    const cmd = `gdown "${url}" -O "${fullPath}" ${flag}`.trim();
-                    console.log(`[Google Drive] Shelling out: ${cmd}`);
-                    try { await execAsync(cmd); } catch(e) { console.error(`[Error] gdown failed for ${url}`); }
-                } else if (isCanva) {
-                    let canvaUrl = url;
-                    if (canvaUrl.includes('/view')) {
-                        canvaUrl = canvaUrl.split('/view')[0] + '/view?embed';
+                this.downloadTasks.push((async () => {
+                    if (isGdown) {
+                        const isDir = url.includes('/folders/') || url.includes('id=');
+                        const flag = isDir ? '--folder' : '';
+                        const cmd = `gdown "${url}" -O "${fullPath}" ${flag}`.trim();
+                        
+                        await this.toolSemaphore.run(async () => {
+                            console.log(`[Google Drive] Shelling out: ${cmd}`);
+                            try { await execAsync(cmd); } catch(e) { console.error(`[Error] gdown failed for ${url}`); }
+                        });
+                    } else if (isCanva) {
+                        let canvaUrl = url;
+                        if (canvaUrl.includes('/view')) {
+                            canvaUrl = canvaUrl.split('/view')[0] + '/view?embed';
+                        } else {
+                            canvaUrl = canvaUrl + '/view?embed';
+                        }
+                        const cmd = `canva-dl "${canvaUrl}" --output "${expectedPath}" --fps 10 --threads 2`;
+                        
+                        await this.toolSemaphore.run(async () => {
+                            console.log(`[Canva] Shelling out: ${cmd}`);
+                            try { await execAsync(cmd); } catch(e) { console.error(`[Error] canva-dl failed for ${canvaUrl}`); }
+                        });
                     } else {
-                        canvaUrl = canvaUrl + '/view?embed';
+                        fs.writeFileSync(expectedPath, url);
                     }
-                    const cmd = `canva-dl "${canvaUrl}" --output "${expectedPath}" --fps 10 --threads 2`;
-                    console.log(`[Canva] Shelling out: ${cmd}`);
-                    try { await execAsync(cmd); } catch(e) { console.error(`[Error] canva-dl failed for ${canvaUrl}`); }
-                } else {
-                    fs.writeFileSync(expectedPath, url);
-                }
 
-                if (itemId) {
-                    this.syncState[itemId] = itemModified;
-                    this.saveSyncState();
-                }
+                    if (itemId) {
+                        this.syncState[itemId] = itemModified;
+                        this.saveSyncState();
+                    }
+                })());
             } 
             
             // 4. TEST / ASSIGNMENT LINKS
@@ -407,6 +426,7 @@ class Session {
 
         console.log("[Sync] Discovered all items. Waiting for background downloads to finish...");
         await Promise.all(this.downloadTasks);
+        this.saveSyncState(true);
         console.log("[Sync] Completed successfully.");
     }
 }

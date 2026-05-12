@@ -5,3 +5,4 @@ node_modules/
 package-lock.json
 ENVISIONED_PLAN.md
 data/
+venv

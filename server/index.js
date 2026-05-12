@@ -32,89 +32,32 @@ function checkSystemRequirements() {
         process.exit(1);
     }
 }
-
-/**
- * Recursively iterates through the course contents tree sequentially.
- * @param {Array} data - The array returned by getCourseContents()
- * @param {Function} callback - Async function executed for each item: (item, path) => Promise
- */
-async function iterateContents(data, callback) {
-    for (const courseEntry of data) {
-        // Root path starts with the course title (cleaned for the filesystem)
-        const coursePath = cleanFilename(courseEntry.course.title);
-
-        async function processItems(items, currentPath) {
-            for (const item of items) {
-                // Construct the full path for this specific item
-                const itemPath = path.join(currentPath, cleanFilename(item.title));
-
-                // 1. Await the callback for the current item (Sequential)
-                await callback(item, itemPath);
-
-                // 2. If children exist, recurse deeper before moving to the next sibling
-                if (item.children && item.children.length > 0) {
-                    await processItems(item.children, itemPath);
-                }
-            }
-        }
-
-        if (courseEntry.contents) {
-            await processItems(courseEntry.contents, coursePath);
-        }
-    }
-}
-
-/**
- * 
- * @param {Object} lessonData 
- */
-async function getLessonFileLink(lessonData) {
-    let fileLink = lessonData.contentDetail["resource/x-bb-file"].file.permanentUrl;
-    let fileURL = new URL('https://mcl.blackboard.com' + fileLink + '?xythos-download=true');
-
-
-    // returns something like
-    // https://mcl.blackboard.com/bbcswebdav/pid-2604812-dt-content-rid-112194099_1/xid-112194099_1?xythos-download=true
-    return fileURL;
-}
-
-
-
-async function main(params) {
+async function main() {
     checkSystemRequirements();
 
-    const bbl = await Engine.create({ username: process.env.BBL_USERNAME, password: process.env.BBL_PASSWORD });
+    const bbl = await Engine.create({ 
+        username: process.env.BBL_USERNAME, 
+        password: process.env.BBL_PASSWORD 
+    });
+    
     const session = new Session(bbl, { dataPath: DATA_DIR });
-    console.log(bbl._getCurrentTerm())
+    
+    console.log(`[Session] Academic Year: ${session.termData.academicYear}, Term: ${session.termData.term}`);
 
+    try {
+        await session.sync();
 
-
-    // temporary function
-    async function getCourseContents() {
-        let courses = await bbl.getCourses();
-        let course_contents = [];
-        for (let course of courses) {
-            // let contents = await bbl.getCourseContents(course.id)
-            console.log(await bbl.getCourseContents(course.id, true)) // here for printing the tree and stuff
-
-            // course_contents.push({
-            //     course: {
-            //         title: course.originalId,
-            //         id: course.id
-            //     },
-            //     contents
-            // });
-        }
-
-        // return course_contents;
+        console.log('[Analyzer] Sync complete. Starting analysis pipeline...');
+        const GeminiAnalyzer = require('./src/GeminiAnalyzer');
+        const analyzer = new GeminiAnalyzer(process.env.GEMINI_API_KEY);
+        await analyzer.runPipeline(session.dataPath);
+        console.log('[Analyzer] Analysis pipeline completed.');
+        
+    } catch (error) {
+        console.error('[Fatal Error] Sync or Analysis failed:', error);
+    } finally {
+        await bbl.close();
     }
-    // await getCourseContents();
-    await session.sync();
-    await bbl.close();
-    // const app = express();
-
-
-    // app.listen(5000);
 }
 
 main();
